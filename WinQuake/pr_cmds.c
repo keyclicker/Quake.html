@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "localize.h"
 
 #define	RETURN_EDICT(e) (((int *)pr_globals)[OFS_RETURN] = EDICT_TO_PROG(e))
 
@@ -34,7 +35,20 @@ char *PF_VarString (int	first)
 {
 	int		i;
 	static char out[256];
+	char	*args[8];
+	char	*s;
 	
+	// 2021 re-release: a known `$key` is a format, other args fill `{}`s
+	s = G_STRING(OFS_PARM0+first*3);
+	if (LOC_Get (s) != s)
+	{
+		for (i=first+1 ; i<pr_argc ; i++)
+			args[i-first-1] = G_STRING((OFS_PARM0+i*3));
+		LOC_Format (s, args, pr_argc-first-1,
+			out, sizeof(out));
+		return out;
+	}
+
 	out[0] = 0;
 	for (i=first ; i<pr_argc ; i++)
 	{
@@ -1828,6 +1842,45 @@ void PF_Fixme (void)
 
 
 
+/*
+=================
+PF_finaleFinished
+
+2021 re-release: float() finaleFinished = #79
+Our finale text has no typing effect to wait for: always done.
+=================
+*/
+void PF_finaleFinished (void)
+{
+	G_FLOAT(OFS_RETURN) = 1;
+}
+
+/*
+=================
+PF_localsound
+
+2021 re-release: void(entity client, string sample) localsound = #80
+Play a sound for one client only, through its `play` command.
+=================
+*/
+void PF_localsound (void)
+{
+	int		entnum;
+	client_t	*client;
+
+	entnum = G_EDICTNUM(OFS_PARM0);
+	if (entnum < 1 || entnum > svs.maxclients)
+	{
+		Con_Printf ("tried to localsound to a non-client\n");
+		return;
+	}
+
+	client = &svs.clients[entnum-1];
+	MSG_WriteByte (&client->message, svc_stufftext);
+	MSG_WriteString (&client->message,
+		va("play %s\n", G_STRING(OFS_PARM1)));
+}
+
 builtin_t pr_builtin[] =
 {
 PF_Fixme,
@@ -1926,7 +1979,10 @@ PF_precache_model,
 PF_precache_sound,		// precache_sound2 is different only for qcc
 PF_precache_file,
 
-PF_setspawnparms
+PF_setspawnparms,
+
+PF_finaleFinished,	// #79, 2021 re-release
+PF_localsound,		// #80, 2021 re-release
 };
 
 builtin_t *pr_builtins = pr_builtin;

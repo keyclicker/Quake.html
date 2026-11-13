@@ -50,6 +50,9 @@ cvar_t	saved2 = {"saved2", "0", true};
 cvar_t	saved3 = {"saved3", "0", true};
 cvar_t	saved4 = {"saved4", "0", true};
 
+// 2021 re-release QuakeC sets these; Cvar_Set needs them to exist
+cvar_t	campaign = {"campaign", "0"};
+
 #define	MAX_FIELD_LEN	64
 #define GEFV_CACHESIZE	2
 
@@ -1082,6 +1085,7 @@ void PR_Init (void)
 	Cvar_RegisterVariable (&saved2);
 	Cvar_RegisterVariable (&saved3);
 	Cvar_RegisterVariable (&saved4);
+	Cvar_RegisterVariable (&campaign);
 }
 
 

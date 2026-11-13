@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "localize.h"
 #include "r_local.h"
 
 /*
@@ -860,6 +861,7 @@ void Host_Init (quakeparms_t *parms)
 	COM_Init (parms->basedir);
 	Host_InitLocal ();
 	W_LoadWadFile ("gfx.wad");
+	LOC_Init ();
 	Key_Init ();
 	Con_Init ();	
 	M_Init ();	
