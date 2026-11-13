@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quake</title>
+<style>
+  :root {
+    --bg: #0b0907;
+    --panel: #17120d;
+    --edge: #3a2a1a;
+    --text: #d8c8a8;
+    --dim: #8a7a60;
+    --accent: #c8641e;
+    --accent-hot: #f08a2c;
+    --error: #e0523a;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+    overflow: hidden;
+  }
+
+  /* The game: letterboxed, crisp pixels */
+  #canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+    image-rendering: pixelated;
+    background: #000;
+    outline: none;
+  }
+
+  /* Loader card over the canvas */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background:
+      radial-gradient(ellipse at 50% 35%, #2a1a0c 0%, transparent 60%),
+      var(--bg);
+  }
+
+  #overlay[hidden] { display: none; }
+
+  .card {
+    width: min(460px, 100%);
+    padding: 28px 28px 22px;
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-top: 3px solid var(--accent);
+    box-shadow: 0 20px 60px #000a;
+  }
+
+  h1 {
+    margin: 0 0 4px;
+    font-size: 44px;
+    letter-spacing: 0.32em;
+    line-height: 1;
+    color: var(--accent-hot);
+    text-shadow: 0 0 18px #c8641e55;
+  }
+
+  .tagline { margin: 0 0 22px; color: var(--dim); font-size: 13px; }
+
+  #status { margin: 0 0 10px; min-height: 1.5em; }
+  #status.error { color: var(--error); white-space: pre-wrap; }
+
+  .bar {
+    height: 6px;
+    background: #0006;
+    border: 1px solid var(--edge);
+    margin-bottom: 18px;
+  }
+
+  .bar > div {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent-hot));
+    transition: width 0.15s;
+  }
+
+  #picker[hidden], .bar[hidden] { display: none; }
+
+  #picker p { margin: 0 0 12px; color: var(--dim); font-size: 13px; }
+
+  label.button {
+    display: inline-block;
+    padding: 8px 14px;
+    border: 1px solid var(--accent);
+    color: var(--accent-hot);
+    cursor: pointer;
+  }
+
+  label.button:hover { background: #c8641e22; }
+  #files { display: none; }
+
+  .keys {
+    margin: 18px 0 0;
+    padding: 12px 0 0;
+    border-top: 1px dashed var(--edge);
+    color: var(--dim);
+    font-size: 12px;
+  }
+
+  kbd {
+    padding: 0 5px;
+    border: 1px solid var(--edge);
+    border-bottom-width: 2px;
+    color: var(--text);
+    font: inherit;
+  }
+
+  a { color: var(--dim); }
+</style>
+</head>
+<body>
+
+<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+
+<div id="overlay">
+  <div class="card">
+    <h1>QUAKE</h1>
+    <p class="tagline">id Software, 1996 &middot; WinQuake in WebAssembly</p>
+
+    <p id="status">Starting&hellip;</p>
+    <div class="bar" id="bar"><div></div></div>
+
+    <div id="picker" hidden>
+      <p>Pick your Quake files: <code>id1/pak0.pak</code> (and
+      <code>pak1.pak</code>, <code>music/*.ogg</code>,
+      <code>loc_english.txt</code> if you have them).</p>
+      <label class="button">Choose files&hellip;
+        <input id="files" type="file" multiple accept=".pak,.ogg,.txt">
+      </label>
+    </div>
+
+    <p class="keys">
+      Click to grab the mouse &middot; <kbd>WASD</kbd> move &middot;
+      <kbd>Esc</kbd> menu &middot; <kbd>`</kbd> console<br>
+      Source (GPL): <a href="https://github.com/keyclicker/Quake.html">github.com/keyclicker/Quake.html</a>
+    </p>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// Page parameters
+//   ?data=<url>   folder holding `id1/` (default: next to this page)
+//   ?args=<cmd>   extra Quake command line, e.g. `+map e1m1 -width 800`
+// ---------------------------------------------------------------------------
+
+const params = new URLSearchParams(location.search);
+const dataBase = (params.get("data") ?? ".").replace(/\/+$/, "");
+const extraArgs = (params.get("args") ?? "").split(/\s+/).filter(Boolean);
+
+const ui = {
+  overlay: document.getElementById("overlay"),
+  status: document.getElementById("status"),
+  bar: document.getElementById("bar"),
+  fill: document.querySelector("#bar > div"),
+  picker: document.getElementById("picker"),
+  files: document.getElementById("files"),
+};
+
+// Files `main` reads from the Emscripten FS; music streams by URL instead
+const GAME_FILES = [
+  { name: "pak0.pak", path: "/quake/id1/pak0.pak", required: true },
+  { name: "pak1.pak", path: "/quake/id1/pak1.pak" },
+  { name: "loc_english.txt",
+    path: "/quake/id1/localization/loc_english.txt",
+    url: "id1/localization/loc_english.txt" },
+];
+
+let musicUrl = (track) =>
+  `${dataBase}/id1/music/track${String(track).padStart(2, "0")}.ogg`;
+
+
+function setStatus(text, fraction) {
+  ui.status.textContent = text;
+  ui.status.className = "";
+  ui.bar.hidden = fraction === undefined;
+  if (fraction !== undefined) {
+    ui.fill.style.width = `${Math.round(fraction * 100)}%`;
+  }
+}
+
+
+/** Bring the card back over the game with a final message. */
+function showMessage(text, isError) {
+  ui.overlay.hidden = false;
+  ui.bar.hidden = true;
+  ui.status.textContent = text;
+  ui.status.className = isError ? "error" : "";
+  document.exitPointerLock?.();
+}
+
+// ---------------------------------------------------------------------------
+// Emscripten module: runs `main` only once the data is in the FS
+// ---------------------------------------------------------------------------
+
+let runtimeReady;
+const runtime = new Promise((resolve) => { runtimeReady = resolve; });
+
+var Module = {
+  canvas: document.getElementById("canvas"),
+  print: (text) => console.log(text),
+  printErr: (text) => console.warn(text),
+  onRuntimeInitialized: () => runtimeReady(),
+  onAbort: (what) => showMessage(`Crashed: ${what}`, true),
+
+  // Called from C (`sys_web.c`, `cd_web.c`)
+  quakeFatal: (message) => showMessage(`Quake error: ${message}`, true),
+  quakeQuit: () => showMessage("You quit. Reload the page to play again."),
+  quakeMusicUrl: (track) => musicUrl(track),
+};
+
+// ---------------------------------------------------------------------------
+// Game data: fetch next to the page, or let the user pick files
+// ---------------------------------------------------------------------------
+
+/** Fetch `url` with progress; resolve bytes, or null on a 404. */
+async function download(url, label) {
+  const response = await fetch(url);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`${url}: HTTP ${response.status}`);
+  }
+
+  const total = Number(response.headers.get("content-length")) || 0;
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    chunks.push(value);
+    received += value.length;
+
+    const mb = (received / 1048576).toFixed(0);
+    setStatus(total
+      ? `Loading ${label}: ${mb} / ${(total / 1048576).toFixed(0)} MB`
+      : `Loading ${label}: ${mb} MB`,
+      total ? received / total : undefined);
+  }
+
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
+
+/** Resolve `{ path: bytes }` from `?data=`, or null if pak0 isn't there. */
+async function loadFromUrl() {
+  const loaded = {};
+
+  for (const file of GAME_FILES) {
+    const url = `${dataBase}/${file.url ?? `id1/${file.name}`}`;
+    let bytes;
+    try {
+      bytes = await download(url, file.name);
+    } catch (err) {
+      if (file.required) {
+        console.warn(err);
+        return null;
+      }
+    }
+    if (!bytes && file.required) {
+      return null;
+    }
+    if (bytes) {
+      loaded[file.path] = bytes;
+    }
+  }
+
+  return loaded;
+}
+
+
+/** Resolve `{ path: bytes }` from files the user picks. */
+function loadFromPicker() {
+  ui.picker.hidden = false;
+  setStatus(`No game data at ${dataBase}/id1/pak0.pak.`);
+
+  return new Promise((resolve) => {
+    ui.files.addEventListener("change", async () => {
+      const picked = [...ui.files.files];
+      const byName = new Map(picked.map((f) => [f.name.toLowerCase(), f]));
+
+      if (!byName.has("pak0.pak")) {
+        setStatus("pak0.pak is missing from the picked files.");
+        return;
+      }
+
+      // Music: blob URLs per track, nothing goes into the FS
+      const tracks = new Map();
+      for (const f of picked) {
+        const m = /^track(\d+)\.ogg$/i.exec(f.name);
+        if (m) {
+          tracks.set(Number(m[1]), URL.createObjectURL(f));
+        }
+      }
+      musicUrl = (track) => tracks.get(track) ?? null;
+
+      const loaded = {};
+      for (const file of GAME_FILES) {
+        const f = byName.get(file.name);
+        if (f) {
+          setStatus(`Reading ${f.name}…`);
+          loaded[file.path] = new Uint8Array(await f.arrayBuffer());
+        }
+      }
+
+      ui.picker.hidden = true;
+      resolve(loaded);
+    });
+  });
+}
+
+
+async function boot() {
+  const loaded = await loadFromUrl() ?? await loadFromPicker();
+
+  setStatus("Starting the engine…");
+  await runtime;
+
+  for (const [path, bytes] of Object.entries(loaded)) {
+    FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));
+    FS.writeFile(path, bytes);
+  }
+
+  ui.overlay.hidden = true;
+  Module.canvas.focus();
+  Module.callMain(extraArgs);
+}
+
+
+boot().catch((err) =>
+  showMessage(`Couldn't start: ${err.message ?? err}`, true));
+</script>
+
+{{{ SCRIPT }}}
+
+</body>
+</html>

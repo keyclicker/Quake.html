@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "localize.h"
 
 server_t		sv;
 server_static_t	svs;
@@ -204,7 +205,9 @@ void SV_SendServerinfo (client_t *client)
 	else
 		MSG_WriteByte (&client->message, GAME_COOP);
 
-	sprintf (message, pr_strings+sv.edicts->v.message);
+	Q_strncpy (message, LOC_Get (pr_strings+sv.edicts->v.message),
+		sizeof(message)-1);
+	message[sizeof(message)-1] = 0;
 
 	MSG_WriteString (&client->message,message);
 

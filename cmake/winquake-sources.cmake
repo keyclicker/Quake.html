@@ -13,7 +13,8 @@ set(WINQUAKE_CORE_SOURCES
   console.c keys.c menu.c sbar.c screen.c view.c
 
   # Shared
-  cmd.c common.c crc.c cvar.c host.c host_cmd.c mathlib.c wad.c zone.c
+  cmd.c common.c crc.c cvar.c host.c host_cmd.c localize.c mathlib.c
+  wad.c zone.c
 
   # Server and QuakeC VM
   sv_main.c sv_move.c sv_phys.c sv_user.c world.c
