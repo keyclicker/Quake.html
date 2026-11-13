@@ -1,0 +1,8 @@
+# Build output
+/build/
+
+# Game data is copyrighted: bring your own (`scripts/setup-data.sh`)
+/data/
+
+# Repo-local Emscripten SDK (`scripts/setup-emsdk.sh`)
+/.emsdk/
